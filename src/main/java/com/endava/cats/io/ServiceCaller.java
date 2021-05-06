@@ -1,6 +1,8 @@
 package com.endava.cats.io;
 
 import com.endava.cats.CatsMain;
+import com.endava.cats.args.AuthArguments;
+import com.endava.cats.args.FilesArguments;
 import com.endava.cats.http.HttpMethod;
 import com.endava.cats.model.CatsHeader;
 import com.endava.cats.model.CatsRequest;
@@ -8,7 +10,6 @@ import com.endava.cats.model.CatsResponse;
 import com.endava.cats.model.FuzzingStrategy;
 import com.endava.cats.report.TestCaseListener;
 import com.endava.cats.util.CatsDSLParser;
-import com.endava.cats.util.CatsParams;
 import com.endava.cats.util.CatsUtil;
 import com.google.common.html.HtmlEscapers;
 import com.google.gson.JsonElement;
@@ -17,7 +18,7 @@ import com.jayway.jsonpath.PathNotFoundException;
 import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.http.Header;
+import org.apache.http.HttpHeaders;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
@@ -30,6 +31,7 @@ import org.apache.http.conn.socket.ConnectionSocketFactory;
 import org.apache.http.conn.socket.PlainConnectionSocketFactory;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.TrustAllStrategy;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
@@ -42,12 +44,13 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.MimeTypeUtils;
 
 import javax.annotation.PostConstruct;
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.SSLContext;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.KeyStore;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -59,14 +62,18 @@ import static com.endava.cats.util.CustomFuzzerUtil.ADDITIONAL_PROPERTIES;
 @Component
 public class ServiceCaller {
     public static final String CATS_REMOVE_FIELD = "cats_remove_field";
+    private static final String EMPTY = "empty";
     private static final PrettyLogger LOGGER = PrettyLoggerFactory.getLogger(ServiceCaller.class);
     private static final List<String> AUTH_HEADERS = Arrays.asList("authorization", "jwt", "api-key", "api_key", "apikey",
             "secret", "secret-key", "secret_key", "api-secret", "api_secret", "apisecret", "api-token", "api_token", "apitoken");
-    private final CatsParams catsParams;
+    private final FilesArguments filesArguments;
     private final CatsUtil catsUtil;
     private final TestCaseListener testCaseListener;
     private final CatsDSLParser catsDSLParser;
-    private HttpClient httpClient;
+    private final AuthArguments authArguments;
+
+    HttpClient httpClient;
+
     @Value("${proxyHost:empty}")
     private String proxyHost;
     @Value("${proxyPort:0}")
@@ -75,34 +82,47 @@ public class ServiceCaller {
     private String server;
 
     @Autowired
-    public ServiceCaller(TestCaseListener lr, CatsUtil cu, CatsParams catsParams, CatsDSLParser cdsl) {
+    public ServiceCaller(TestCaseListener lr, CatsUtil cu, FilesArguments filesArguments, CatsDSLParser cdsl, AuthArguments authArguments) {
         this.testCaseListener = lr;
         this.catsUtil = cu;
-        this.catsParams = catsParams;
+        this.filesArguments = filesArguments;
         this.catsDSLParser = cdsl;
+        this.authArguments = authArguments;
     }
 
     @PostConstruct
     public void initHttpClient() {
         try {
-            SSLContext sslContext = new SSLContextBuilder()
-                    .loadTrustMaterial(null, (certificate, authType) -> true).build();
-            HostnameVerifier hostnameVerifier = new NoopHostnameVerifier();
-
-            SSLConnectionSocketFactory sslSocketFactory = new SSLConnectionSocketFactory(sslContext, hostnameVerifier);
+            SSLConnectionSocketFactory sslSocketFactory = this.buildSSLContextFactory();
             Registry<ConnectionSocketFactory> socketFactoryRegistry = RegistryBuilder.<ConnectionSocketFactory>create().register("http", PlainConnectionSocketFactory.getSocketFactory()).register("https", sslSocketFactory).build();
             PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager(socketFactoryRegistry);
             connectionManager.setMaxTotal(100);
             connectionManager.setDefaultMaxPerRoute(100);
-            HttpHost httpHost = null;
-            if (!"empty".equalsIgnoreCase(proxyHost)) {
-                LOGGER.note("Proxy configuration to be used: host={}, port={}", proxyHost, proxyPort);
-                httpHost = new HttpHost(proxyHost, proxyPort);
-            }
-            httpClient = HttpClients.custom().setConnectionManager(connectionManager).setSSLContext(sslContext).setProxy(httpHost).build();
-        } catch (GeneralSecurityException e) {
-            LOGGER.warning("Failed to configure HTTP CLIENT socket factory");
+            HttpHost httpHost = getProxyConfig();
+            httpClient = HttpClients.custom().setConnectionManager(connectionManager).setSSLSocketFactory(sslSocketFactory).setProxy(httpHost).build();
+        } catch (GeneralSecurityException | IOException e) {
+            LOGGER.warning("Failed to configure HTTP CLIENT", e);
         }
+    }
+
+    private HttpHost getProxyConfig() {
+        HttpHost httpHost = null;
+        if (!EMPTY.equalsIgnoreCase(proxyHost)) {
+            LOGGER.note("Proxy configuration to be used: host={}, port={}", proxyHost, proxyPort);
+            httpHost = new HttpHost(proxyHost, proxyPort);
+        }
+        return httpHost;
+    }
+
+    private SSLConnectionSocketFactory buildSSLContextFactory() throws GeneralSecurityException, IOException {
+        SSLContextBuilder sslContextBuilder = new SSLContextBuilder().loadTrustMaterial(null, TrustAllStrategy.INSTANCE);
+
+        if (!EMPTY.equalsIgnoreCase(authArguments.getSslKeystore())) {
+            KeyStore keyStore = KeyStore.getInstance("jks");
+            keyStore.load(new FileInputStream(authArguments.getSslKeystore()), authArguments.getSslKeystorePwd().toCharArray());
+            sslContextBuilder.loadKeyMaterial(keyStore, authArguments.getSslKeyPwd().toCharArray());
+        }
+        return new SSLConnectionSocketFactory(sslContextBuilder.build(), NoopHostnameVerifier.INSTANCE);
     }
 
     public CatsResponse call(HttpMethod method, ServiceData data) {
@@ -194,7 +214,7 @@ public class ServiceCaller {
      * @return
      */
     private String getPathWithSuppliedURLParamsReplaced(String startingUrl) {
-        for (String line : catsParams.getUrlParamsList()) {
+        for (String line : filesArguments.getUrlParamsList()) {
             String[] urlParam = line.split(":");
             String pathVar = "{" + urlParam[0] + "}";
             if (startingUrl.contains(pathVar)) {
@@ -218,6 +238,7 @@ public class ServiceCaller {
             this.addSuppliedHeaders(method, data.getRelativePath(), data);
             this.setHttpMethodPayload(method, processedPayload, data);
             this.removeSkippedHeaders(data, method);
+            this.addBasicAuth(method);
 
             LOGGER.note("Final list of request headers: {}", Arrays.asList(method.getAllHeaders()));
             LOGGER.note("Final payload: {}", processedPayload);
@@ -232,12 +253,20 @@ public class ServiceCaller {
             List<CatsHeader> responseHeaders = Arrays.stream(response.getAllHeaders()).map(header -> CatsHeader.builder().name(header.getName()).value(header.getValue()).build()).collect(Collectors.toList());
 
             CatsResponse catsResponse = CatsResponse.from(response.getStatusLine().getStatusCode(), responseBody, method.getMethod(), endTime - startTime, responseHeaders, data.getFuzzedFields());
-            this.recordRequestAndResponse(Arrays.asList(method.getAllHeaders()), processedPayload, catsResponse, data.getRelativePath(), HtmlEscapers.htmlEscaper().escape(method.getURI().toString()));
+            this.recordRequestAndResponse(method, processedPayload, catsResponse, data.getRelativePath());
 
             return catsResponse;
         } catch (IOException | URISyntaxException e) {
-            this.recordRequestAndResponse(Arrays.asList(method.getAllHeaders()), processedPayload, CatsResponse.empty(), data.getRelativePath(), HtmlEscapers.htmlEscaper().escape(method.getURI().toString()));
+            this.recordRequestAndResponse(method, processedPayload, CatsResponse.empty(), data.getRelativePath());
             throw new CatsIOException(e);
+        }
+    }
+
+    private void addBasicAuth(HttpRequestBase method) {
+        if (!EMPTY.equalsIgnoreCase(authArguments.getBasicAuth())) {
+            byte[] encodedAuth = Base64.getEncoder().encode(authArguments.getBasicAuth().getBytes(StandardCharsets.ISO_8859_1));
+            String authHeader = "Basic " + new String(encodedAuth);
+            method.setHeader(HttpHeaders.AUTHORIZATION, authHeader);
         }
     }
 
@@ -320,21 +349,22 @@ public class ServiceCaller {
         return "{\"exception\":\"Received response is not a JSON\"}";
     }
 
-    private void recordRequestAndResponse(List<Header> headers, String processedPayload, CatsResponse catsResponse, String relativePath, String fullRequestPath) {
+    private void recordRequestAndResponse(HttpRequestBase method, String processedPayload, CatsResponse catsResponse, String relativePath) {
         CatsRequest request = new CatsRequest();
-        request.setHeaders(headers);
+        request.setHeaders(Arrays.asList(method.getAllHeaders()));
         request.setPayload(processedPayload);
+        request.setHttpMethod(method.getMethod());
         testCaseListener.addPath(relativePath);
         testCaseListener.addRequest(request);
         testCaseListener.addResponse(catsResponse);
-        testCaseListener.addFullRequestPath(fullRequestPath);
+        testCaseListener.addFullRequestPath(HtmlEscapers.htmlEscaper().escape(method.getURI().toString()));
     }
 
     private void addSuppliedHeaders(HttpRequestBase method, String relativePath, ServiceData data) {
-        LOGGER.note("Path {} has the following headers: {}", relativePath, catsParams.getHeaders().get(relativePath));
-        LOGGER.note("Headers that should be added to all paths: {}", catsParams.getHeaders().get(CatsMain.ALL));
+        LOGGER.note("Path {} has the following headers: {}", relativePath, filesArguments.getHeaders().get(relativePath));
+        LOGGER.note("Headers that should be added to all paths: {}", filesArguments.getHeaders().get(CatsMain.ALL));
 
-        Map<String, String> suppliedHeaders = catsParams.getHeaders().entrySet().stream()
+        Map<String, String> suppliedHeaders = filesArguments.getHeaders().entrySet().stream()
                 .filter(entry -> entry.getKey().equalsIgnoreCase(relativePath) || entry.getKey().equalsIgnoreCase(CatsMain.ALL))
                 .map(Map.Entry::getValue).collect(HashMap::new, Map::putAll, Map::putAll);
 
@@ -374,7 +404,7 @@ public class ServiceCaller {
      * @return the path with reference data replacing path parameters
      */
     private String replacePathWithRefData(ServiceData data, String currentUrl) {
-        Map<String, String> currentPathRefData = catsParams.getRefData(data.getRelativePath());
+        Map<String, String> currentPathRefData = filesArguments.getRefData(data.getRelativePath());
         LOGGER.note("Path reference data replacement: path {} has the following reference data: {}", data.getRelativePath(), currentPathRefData);
 
         for (Map.Entry<String, String> entry : currentPathRefData.entrySet()) {
@@ -390,7 +420,7 @@ public class ServiceCaller {
             LOGGER.note("Bypassing reference data replacement for path {}!", data.getRelativePath());
             return data.getPayload();
         } else {
-            Map<String, String> refDataForCurrentPath = catsParams.getRefData(data.getRelativePath());
+            Map<String, String> refDataForCurrentPath = filesArguments.getRefData(data.getRelativePath());
             LOGGER.note("Payload reference data replacement: path {} has the following reference data: {}", data.getRelativePath(), refDataForCurrentPath);
             Map<String, String> refDataWithoutAdditionalProperties = refDataForCurrentPath.entrySet().stream()
                     .filter(stringStringEntry -> !stringStringEntry.getKey().equalsIgnoreCase(ADDITIONAL_PROPERTIES))

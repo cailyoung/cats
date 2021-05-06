@@ -6,10 +6,12 @@ import com.endava.cats.model.FuzzingData;
 import com.endava.cats.report.TestCaseListener;
 import com.endava.cats.util.CatsUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
 @HttpFuzzer
+@ConditionalOnProperty(value = "fuzzer.http.MalformedJsonFuzzer.enabled", havingValue = "true")
 public class MalformedJsonFuzzer extends BaseHttpWithPayloadSimpleFuzzer {
 
     @Autowired
@@ -19,7 +21,7 @@ public class MalformedJsonFuzzer extends BaseHttpWithPayloadSimpleFuzzer {
 
     @Override
     protected String getScenario() {
-        return "Scenario: Send a malformed JSON which has the string 'bla' at the end (the report won't actually display it as all requests need to be actual JSONs, but please check the logs to see the actual request payload)";
+        return "Send a malformed JSON which has the string 'bla' at the end (the report won't actually display it as all requests need to be actual JSONs, but please check the logs to see the actual request payload)";
     }
 
     @Override

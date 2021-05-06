@@ -7,9 +7,10 @@ import com.endava.cats.io.ServiceCaller;
 import com.endava.cats.model.FuzzingData;
 import com.endava.cats.model.FuzzingStrategy;
 import com.endava.cats.report.TestCaseListener;
-import com.endava.cats.util.CatsParams;
+import com.endava.cats.args.FilesArguments;
 import com.endava.cats.util.CatsUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -17,10 +18,11 @@ import java.util.List;
 
 @Component
 @FieldFuzzer
+@ConditionalOnProperty(value = "fuzzer.fields.NullValuesInFieldsFuzzer.enabled", havingValue = "true")
 public class NullValuesInFieldsFuzzer extends Expect4XXForRequiredBaseFieldsFuzzer {
 
     @Autowired
-    public NullValuesInFieldsFuzzer(ServiceCaller sc, TestCaseListener lr, CatsUtil cu, CatsParams cp) {
+    public NullValuesInFieldsFuzzer(ServiceCaller sc, TestCaseListener lr, CatsUtil cu, FilesArguments cp) {
         super(sc, lr, cu, cp);
     }
 

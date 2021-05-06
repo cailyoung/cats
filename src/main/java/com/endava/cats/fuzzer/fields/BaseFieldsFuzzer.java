@@ -1,13 +1,13 @@
 package com.endava.cats.fuzzer.fields;
 
 
+import com.endava.cats.args.FilesArguments;
 import com.endava.cats.fuzzer.Fuzzer;
 import com.endava.cats.fuzzer.http.ResponseCodeFamily;
 import com.endava.cats.io.ServiceCaller;
 import com.endava.cats.io.ServiceData;
 import com.endava.cats.model.*;
 import com.endava.cats.report.TestCaseListener;
-import com.endava.cats.util.CatsParams;
 import com.endava.cats.util.CatsUtil;
 import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
  */
 public abstract class BaseFieldsFuzzer implements Fuzzer {
     public static final String CATS_REMOVE_FIELD = "cats_remove_field";
-    final CatsParams catsParams;
+    final FilesArguments filesArguments;
     final PrettyLogger logger = PrettyLoggerFactory.getLogger(getClass());
     private final ServiceCaller serviceCaller;
     private final TestCaseListener testCaseListener;
@@ -32,11 +32,11 @@ public abstract class BaseFieldsFuzzer implements Fuzzer {
 
 
     @Autowired
-    protected BaseFieldsFuzzer(ServiceCaller sc, TestCaseListener lr, CatsUtil cu, CatsParams cp) {
+    protected BaseFieldsFuzzer(ServiceCaller sc, TestCaseListener lr, CatsUtil cu, FilesArguments cp) {
         this.serviceCaller = sc;
         this.testCaseListener = lr;
         this.catsUtil = cu;
-        this.catsParams = cp;
+        this.filesArguments = cp;
     }
 
 
@@ -45,7 +45,7 @@ public abstract class BaseFieldsFuzzer implements Fuzzer {
         logger.info("All required fields, including subfields: {}", data.getAllRequiredFields());
         logger.info("All fields {}", data.getAllFields());
 
-        List<String> fieldsToBeRemoved = catsParams.getRefData(data.getPath()).keySet()
+        List<String> fieldsToBeRemoved = filesArguments.getRefData(data.getPath()).keySet()
                 .stream().filter(CATS_REMOVE_FIELD::equalsIgnoreCase).collect(Collectors.toList());
         logger.note("The following fields marked as [{}] in refData will not be fuzzed: {}", CATS_REMOVE_FIELD, fieldsToBeRemoved);
         Set<String> allFields = data.getAllFields();
@@ -61,7 +61,7 @@ public abstract class BaseFieldsFuzzer implements Fuzzer {
 
         FuzzingConstraints fuzzingConstraints = this.createFuzzingConstraints(data, fuzzingStrategy, fuzzedField);
 
-        testCaseListener.addScenario(logger, "Scenario: Send [{}] in request fields: field [{}], value [{}], is required [{}]",
+        testCaseListener.addScenario(logger, "Send [{}] in request fields: field [{}], value [{}], is required [{}]",
                 this.typeOfDataSentToTheService(), fuzzedField, fuzzingStrategy.truncatedValue(), fuzzingConstraints.getRequiredString());
 
         if (this.isFuzzingPossible(data, fuzzedField, fuzzingStrategy)) {
@@ -77,7 +77,7 @@ public abstract class BaseFieldsFuzzer implements Fuzzer {
 
             ResponseCodeFamily expectedResponseCodeBasedOnConstraints = this.getExpectedResponseCodeBasedOnConstraints(isFuzzedValueMatchingPattern, fuzzingConstraints);
 
-            testCaseListener.addExpectedResult(logger, "Expected result: should return [{}]", expectedResponseCodeBasedOnConstraints.asString());
+            testCaseListener.addExpectedResult(logger, "Should return [{}]", expectedResponseCodeBasedOnConstraints.asString());
             testCaseListener.reportResult(logger, data, response, expectedResponseCodeBasedOnConstraints);
         } else {
             FuzzingStrategy strategy = this.createSkipStrategy(fuzzingStrategy);
@@ -86,13 +86,12 @@ public abstract class BaseFieldsFuzzer implements Fuzzer {
     }
 
     private FuzzingStrategy createSkipStrategy(FuzzingStrategy fuzzingStrategy) {
-        return fuzzingStrategy.isSkip() ? fuzzingStrategy : FuzzingStrategy.skip().withData("Field is not a primitive");
+        return fuzzingStrategy.isSkip() ? fuzzingStrategy : FuzzingStrategy.skip().withData("Field is not a primitive or is a discriminator");
     }
 
     private boolean isFuzzingPossible(FuzzingData data, String fuzzedField, FuzzingStrategy fuzzingStrategy) {
-        return !fuzzingStrategy.isSkip() && catsUtil.isPrimitive(data.getPayload(), fuzzedField);
+        return !fuzzingStrategy.isSkip() && catsUtil.isPrimitive(data.getPayload(), fuzzedField) && isFuzzingPossibleSpecificToFuzzer(data, fuzzedField, fuzzingStrategy);
     }
-
 
     private ResponseCodeFamily getExpectedResponseCodeBasedOnConstraints(boolean isFuzzedValueMatchingPattern, FuzzingConstraints fuzzingConstraints) {
         if (!isFuzzedValueMatchingPattern) {
@@ -166,5 +165,15 @@ public abstract class BaseFieldsFuzzer implements Fuzzer {
      */
     protected abstract FuzzingStrategy getFieldFuzzingStrategy(FuzzingData data, String fuzzedField);
 
-
+    /**
+     * Override this in order to prevent the fuzzer from running for context particular to the given fuzzer.
+     *
+     * @param data
+     * @param fuzzedField
+     * @param fuzzingStrategy
+     * @return
+     */
+    protected boolean isFuzzingPossibleSpecificToFuzzer(FuzzingData data, String fuzzedField, FuzzingStrategy fuzzingStrategy) {
+        return true;
+    }
 }

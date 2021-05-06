@@ -16,10 +16,12 @@ import com.google.gson.JsonParser;
 import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
 @FieldFuzzer
+@ConditionalOnProperty(value = "fuzzer.fields.NewFieldsFuzzer.enabled", havingValue = "true")
 public class NewFieldsFuzzer implements Fuzzer {
     protected static final String NEW_FIELD = "catsFuzzyField";
     private static final PrettyLogger LOGGER = PrettyLoggerFactory.getLogger(NewFieldsFuzzer.class);
@@ -46,8 +48,8 @@ public class NewFieldsFuzzer implements Fuzzer {
         if (catsUtil.isHttpMethodWithPayload(data.getMethod())) {
             expectedResultCode = ResponseCodeFamily.FOURXX;
         }
-        testCaseListener.addScenario(LOGGER, "Scenario: add new field inside the request: name [{}], value [{}]. All other details are similar to a happy flow", NEW_FIELD, NEW_FIELD);
-        testCaseListener.addExpectedResult(LOGGER, "Expected result: should get a [{}] response code", expectedResultCode.asString());
+        testCaseListener.addScenario(LOGGER, "Add new field inside the request: name [{}], value [{}]. All other details are similar to a happy flow", NEW_FIELD, NEW_FIELD);
+        testCaseListener.addExpectedResult(LOGGER, "Should get a [{}] response code", expectedResultCode.asString());
 
         CatsResponse response = serviceCaller.call(data.getMethod(), ServiceData.builder().relativePath(data.getPath()).headers(data.getHeaders())
                 .payload(fuzzedJson.toString()).queryParams(data.getQueryParams()).build());

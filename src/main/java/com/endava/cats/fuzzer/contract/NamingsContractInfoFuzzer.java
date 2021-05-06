@@ -10,16 +10,19 @@ import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.util.MimeTypeUtils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 @ContractInfoFuzzer
 @Component
+@ConditionalOnProperty(value = "fuzzer.contract.NamingsContractInfoFuzzer.enabled", havingValue = "true")
 public class NamingsContractInfoFuzzer extends BaseContractInfoFuzzer {
     private static final Pattern HYPHEN_CASE = Pattern.compile("(^[a-z]+((-)?[a-z])+$)+");
     private static final Pattern SNAKE_CASE = Pattern.compile("(^[a-z]+((_)?[a-z])+$)+");
@@ -36,8 +39,8 @@ public class NamingsContractInfoFuzzer extends BaseContractInfoFuzzer {
 
     @Override
     public void process(FuzzingData data) {
-        testCaseListener.addScenario(log, "Scenario: Check if the current path REST naming good practices");
-        testCaseListener.addExpectedResult(log, "Path should match the REST naming good practices. Must use: nouns, plurals, lowercase hyphen-case/snake_case for endpoints, camelCase/snake_case for JSON properties");
+        testCaseListener.addScenario(log, "Check if the current path follows RESTful API naming good practices for HTTP method {}", data.getMethod());
+        testCaseListener.addExpectedResult(log, "Path should follow the RESTful API naming good practices. Must use: nouns, plurals, lowercase hyphen-case/snake_case for endpoints, camelCase/snake_case for JSON properties");
 
         StringBuilder errorString = new StringBuilder();
         String[] pathElements = data.getPath().substring(1).split("/");
@@ -48,9 +51,9 @@ public class NamingsContractInfoFuzzer extends BaseContractInfoFuzzer {
         errorString.append(this.checkJsonObjects(data));
 
         if (!errorString.toString().isEmpty()) {
-            testCaseListener.reportError(log, "Path does not follow REST naming good practices: {}", errorString.toString());
+            testCaseListener.reportError(log, "Path does not follow RESTful API naming good practices: {}", errorString.toString());
         } else {
-            testCaseListener.reportInfo(log, "Path follows the REST naming good practices.");
+            testCaseListener.reportInfo(log, "Path follows the RESTful API naming good practices.");
         }
     }
 
@@ -89,7 +92,9 @@ public class NamingsContractInfoFuzzer extends BaseContractInfoFuzzer {
     }
 
     private String checkPlurals(String[] pathElements) {
-        return this.check(pathElements, pathElement -> this.isNotAPathVariable(pathElement) && !pathElement.endsWith(PLURAL_END),
+        String[] strippedPathElements = pathElements.length >= 2 ? Arrays.copyOfRange(pathElements, 1, pathElements.length - 1) : pathElements;
+
+        return this.check(strippedPathElements, pathElement -> this.isNotAPathVariable(pathElement) && !pathElement.endsWith(PLURAL_END),
                 "The following path elements are not using plural: %s");
     }
 
@@ -119,11 +124,11 @@ public class NamingsContractInfoFuzzer extends BaseContractInfoFuzzer {
 
     @Override
     protected String runKey(FuzzingData data) {
-        return data.getPath();
+        return data.getPath() + data.getMethod();
     }
 
     @Override
     public String description() {
-        return "verifies that all OpenAPI contract elements follow REST API naming good practices";
+        return "verifies that all OpenAPI contract elements follow RESTful API naming good practices";
     }
 }

@@ -14,6 +14,7 @@ import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
 import org.apache.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ import java.util.function.Function;
 
 @Component
 @HttpFuzzer
+@ConditionalOnProperty(value = "fuzzer.http.HttpMethodsFuzzer.enabled", havingValue = "true")
 public class HttpMethodsFuzzer implements Fuzzer {
     private static final PrettyLogger LOGGER = PrettyLoggerFactory.getLogger(HttpMethodsFuzzer.class);
     private final List<String> fuzzedPaths = new ArrayList<>();
@@ -60,8 +62,8 @@ public class HttpMethodsFuzzer implements Fuzzer {
     }
 
     private void process(String path, Set<CatsHeader> headers, Function<ServiceData, CatsResponse> f) {
-        testCaseListener.addScenario(LOGGER, "Scenario: send a happy flow request with undocumented HTTP methods");
-        testCaseListener.addExpectedResult(LOGGER, "Expected result: should get a 405 response code");
+        testCaseListener.addScenario(LOGGER, "Send a happy flow request with undocumented HTTP methods");
+        testCaseListener.addExpectedResult(LOGGER, "Should get a 405 response code");
         CatsResponse response = f.apply(ServiceData.builder().relativePath(path).headers(headers).payload("").build());
         this.checkResponse(response);
         fuzzedPaths.add(path);

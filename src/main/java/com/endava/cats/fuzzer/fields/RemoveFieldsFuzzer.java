@@ -13,6 +13,7 @@ import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -25,6 +26,7 @@ import java.util.Set;
  */
 @Component
 @FieldFuzzer
+@ConditionalOnProperty(value = "fuzzer.fields.RemoveFieldsFuzzer.enabled", havingValue = "true")
 public class RemoveFieldsFuzzer implements Fuzzer {
     private static final PrettyLogger LOGGER = PrettyLoggerFactory.getLogger(RemoveFieldsFuzzer.class);
 
@@ -69,10 +71,10 @@ public class RemoveFieldsFuzzer implements Fuzzer {
         String finalJsonPayload = this.getFuzzedJsonWithFieldsRemove(data.getPayload(), subset);
 
         if (!catsUtil.equalAsJson(finalJsonPayload, data.getPayload())) {
-            testCaseListener.addScenario(LOGGER, "Scenario: remove the following fields from request: {}", subset);
+            testCaseListener.addScenario(LOGGER, "Remove the following fields from request: {}", subset);
 
             boolean hasRequiredFieldsRemove = this.hasRequiredFieldsRemove(required, subset);
-            testCaseListener.addExpectedResult(LOGGER, "Expected result: should return [{}] response code as required fields [{}] removed", catsUtil.getExpectedWordingBasedOnRequiredFields(hasRequiredFieldsRemove));
+            testCaseListener.addExpectedResult(LOGGER, "Should return [{}] response code as required fields [{}] removed", catsUtil.getExpectedWordingBasedOnRequiredFields(hasRequiredFieldsRemove));
 
             CatsResponse response = serviceCaller.call(data.getMethod(), ServiceData.builder().relativePath(data.getPath()).headers(data.getHeaders())
                     .payload(finalJsonPayload).queryParams(data.getQueryParams()).build());

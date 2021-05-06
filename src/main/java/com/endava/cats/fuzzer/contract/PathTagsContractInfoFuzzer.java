@@ -7,6 +7,7 @@ import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
 import io.swagger.v3.oas.models.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
@@ -18,6 +19,7 @@ import java.util.stream.Collectors;
 
 @ContractInfoFuzzer
 @Component
+@ConditionalOnProperty(value = "fuzzer.contract.PathTagsContractInfoFuzzer.enabled", havingValue = "true")
 public class PathTagsContractInfoFuzzer extends BaseContractInfoFuzzer {
     private final PrettyLogger log = PrettyLoggerFactory.getLogger(this.getClass());
 
@@ -28,7 +30,7 @@ public class PathTagsContractInfoFuzzer extends BaseContractInfoFuzzer {
 
     @Override
     public void process(FuzzingData data) {
-        testCaseListener.addScenario(log, "Scenario: Check if the current path contains the tags element");
+        testCaseListener.addScenario(log, "Check if the current path contains the [tags] element for HTTP method {}", data.getMethod());
         testCaseListener.addExpectedResult(log, "[tags] element must be present and match the ones defined at the top level");
 
         List<String> topLevelTagNames = Optional.ofNullable(data.getOpenApi().getTags()).orElse(Collections.emptyList()).stream()

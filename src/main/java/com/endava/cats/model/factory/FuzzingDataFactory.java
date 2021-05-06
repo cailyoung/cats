@@ -1,10 +1,10 @@
 package com.endava.cats.model.factory;
 
+import com.endava.cats.args.FilesArguments;
 import com.endava.cats.generator.simple.PayloadGenerator;
 import com.endava.cats.http.HttpMethod;
 import com.endava.cats.model.CatsHeader;
 import com.endava.cats.model.FuzzingData;
-import com.endava.cats.util.CatsParams;
 import com.endava.cats.util.CatsUtil;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -34,15 +34,15 @@ public class FuzzingDataFactory {
     private static final String ONE_OF = "ONE_OF";
 
     private final CatsUtil catsUtil;
-    private final CatsParams catsParams;
+    private final FilesArguments filesArguments;
 
     @Value("${useExamples:true}")
     private String useExamples;
 
     @Autowired
-    public FuzzingDataFactory(CatsUtil catsUtil, CatsParams catsParams) {
+    public FuzzingDataFactory(CatsUtil catsUtil, FilesArguments filesArguments) {
         this.catsUtil = catsUtil;
-        this.catsParams = catsParams;
+        this.filesArguments = filesArguments;
     }
 
     /**
@@ -101,7 +101,7 @@ public class FuzzingDataFactory {
                 .responseCodes(operation.getResponses().keySet()).reqSchema(syntheticSchema).pathItem(item)
                 .schemaMap(schemas).responses(responses)
                 .responseContentTypes(responsesContentTypes)
-                .requestPropertyTypes(PayloadGenerator.getRequestDataTypes())
+                .requestPropertyTypes(PayloadGenerator.GlobalData.getRequestDataTypes())
                 .requestContentTypes(requestContentTypes)
                 .catsUtil(catsUtil)
                 .queryParams(queryParams)
@@ -140,7 +140,7 @@ public class FuzzingDataFactory {
         List<String> required = new ArrayList<>();
         for (Parameter parameter : Optional.ofNullable(operationParameters).orElseGet(Collections::emptyList)) {
             if (("path".equalsIgnoreCase(parameter.getIn()) || "query".equalsIgnoreCase(parameter.getIn()))
-                    && catsParams.getUrlParamsList().stream().noneMatch(urlParam -> urlParam.startsWith(parameter.getName()))) {
+                    && filesArguments.getUrlParamsList().stream().noneMatch(urlParam -> urlParam.startsWith(parameter.getName()))) {
                 parameter.getSchema().setName(parameter.getSchema().getName() + "|" + parameter.getIn());
                 syntheticSchema.addProperties(parameter.getName(), parameter.getSchema());
                 if (parameter.getRequired() != null && parameter.getRequired()) {
@@ -197,7 +197,7 @@ public class FuzzingDataFactory {
                             .responseContentTypes(responsesContentTypes)
                             .requestContentTypes(requestContentTypes)
                             .schemaMap(schemas).responses(responses)
-                            .requestPropertyTypes(PayloadGenerator.getRequestDataTypes())
+                            .requestPropertyTypes(PayloadGenerator.GlobalData.getRequestDataTypes())
                             .catsUtil(catsUtil)
                             .openApi(openAPI)
                             .tags(operation.getTags())
@@ -266,10 +266,13 @@ public class FuzzingDataFactory {
 
     private List<String> generateSample(String reqSchemaName, PayloadGenerator generator) {
         List<Map<String, String>> examples = generator.generate(null, reqSchemaName);
+        if (examples.isEmpty()) {
+            throw new IllegalArgumentException("Scheme is not declared: " + reqSchemaName);
+        }
         String payloadSample = examples.get(0).get("example");
 
         payloadSample = this.squashAllOfElements(payloadSample);
-        return this.getPayloadCombinationsBasedOnOneOfAndAnyOf(payloadSample, generator.getDiscriminators());
+        return this.getPayloadCombinationsBasedOnOneOfAndAnyOf(payloadSample, PayloadGenerator.GlobalData.getDiscriminators());
     }
 
     /**
@@ -387,8 +390,8 @@ public class FuzzingDataFactory {
             if (reqBodyRef != null) {
                 operation.getRequestBody().setContent(openAPI.getComponents().getRequestBodies().get(reqBodyRef.substring(reqBodyRef.lastIndexOf("/") + 1)).getContent());
             }
-            requests.addAll(Optional.ofNullable(operation.getRequestBody().getContent()).orElse(defaultContent)
-                    .entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toList()));
+            requests.addAll(new ArrayList<>(Optional.ofNullable(operation.getRequestBody().getContent()).orElse(defaultContent)
+                    .keySet()));
         }
         return requests;
     }
@@ -399,8 +402,8 @@ public class FuzzingDataFactory {
             ApiResponse apiResponse = operation.getResponses().get(responseCode);
             Content defaultContent = new Content();
             defaultContent.addMediaType(MimeTypeUtils.APPLICATION_JSON_VALUE, new MediaType());
-            responses.put(responseCode, Optional.ofNullable(apiResponse.getContent()).orElse(defaultContent)
-                    .entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toList()));
+            responses.put(responseCode, new ArrayList<>(Optional.ofNullable(apiResponse.getContent()).orElse(defaultContent)
+                    .keySet()));
         }
 
         return responses;

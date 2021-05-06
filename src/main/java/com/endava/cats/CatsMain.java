@@ -1,14 +1,13 @@
 package com.endava.cats;
 
 import ch.qos.logback.classic.Level;
+import com.endava.cats.args.*;
 import com.endava.cats.fuzzer.*;
 import com.endava.cats.fuzzer.fields.CustomFuzzer;
-import com.endava.cats.model.CatsSkipped;
 import com.endava.cats.model.FuzzingData;
 import com.endava.cats.model.factory.FuzzingDataFactory;
 import com.endava.cats.report.ExecutionStatisticsListener;
 import com.endava.cats.report.TestCaseListener;
-import com.endava.cats.util.CatsParams;
 import com.endava.cats.util.CatsUtil;
 import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
@@ -23,7 +22,6 @@ import org.apache.commons.io.Charsets;
 import org.fusesource.jansi.Ansi;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.Banner;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.ExitCodeGenerator;
@@ -40,6 +38,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -54,7 +53,6 @@ import static org.fusesource.jansi.Ansi.ansi;
 @SpringBootApplication
 public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
     public static final AtomicInteger TEST = new AtomicInteger(0);
-    public static final String EMPTY = "empty";
     public static final String ALL = "all";
     private static final String LIST = "list";
     private static final PrettyLogger LOGGER = PrettyLoggerFactory.getLogger(CatsMain.class);
@@ -66,49 +64,22 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
     private static final String EXAMPLE = ansi().fg(Ansi.Color.CYAN).a("./cats.jar --server=http://localhost:8080 --contract=con.yml").reset().toString();
     private static final String COMMAND_TEMPLATE = ansi().render("\t --@|cyan {}|@={}").reset().toString();
 
-    protected List<CatsSkipped> skipFuzzersForPaths;
-    @Value("${contract:empty}")
-    private String contract;
-    @Value("${server:empty}")
-    private String server;
-    @Value("${fuzzers:all}")
-    private String suppliedFuzzers;
-    @Value("${log:empty}")
-    private String logData;
-    @Value("${fieldsFuzzingStrategy:ONEBYONE}")
-    private String fieldsFuzzingStrategy;
-    @Value("${maxFieldsToRemove:empty}")
-    private String maxFieldsToRemove;
-    @Value("${paths:all}")
-    private String paths;
-    @Value("${refData:empty}")
-    private String refDataFile;
-    @Value("${headers:empty}")
-    private String headersFile;
-    @Value("${reportingLevel:info}")
-    private String reportingLevel;
-    @Value("${edgeSpacesStrategy:trimAndValidate}")
-    private String edgeSpacesStrategy;
-    @Value("${urlParams:empty}")
-    private String urlParams;
-    @Value("${customFuzzerFile:empty}")
-    private String customFuzzerFile;
-    @Value("${excludedFuzzers:empty}")
-    private String excludedFuzzers;
-    @Value("${useExamples:true}")
-    private String useExamples;
-    @Value("${checkHeaders:empty}")
-    private String checkHeaders;
-    @Value("${checkFields:empty}")
-    private String checkFields;
-    @Value("${checkHttp:empty}")
-    private String checkHttp;
-    @Value("${checkContract:empty}")
-    private String checkContract;
-    @Value("${securityFuzzerFile:empty}")
-    private String securityFuzzerFile;
-    @Value("${printExecutionStatistics:empty}")
-    private String printExecutionStatistics;
+
+    @Autowired
+    private ApiArguments apiArguments;
+    @Autowired
+    private ProcessingArguments processingArguments;
+    @Autowired
+    private FilterArguments filterArguments;
+    @Autowired
+    private FilesArguments filesArguments;
+    @Autowired
+    private ReportingArguments reportingArguments;
+    @Autowired
+    private CheckArguments checkArgs;
+    @Autowired
+    private AuthArguments authArgs;
+
     @Autowired
     private List<Fuzzer> fuzzers;
     @Autowired
@@ -118,16 +89,10 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
     @Autowired
     private ExecutionStatisticsListener executionStatisticsListener;
     @Autowired
-    private CatsParams catsParams;
-    @Autowired
     private TestCaseListener testCaseListener;
 
     public static void main(String... args) {
         System.exit(SpringApplication.exit(new SpringApplicationBuilder(CatsMain.class).bannerMode(Banner.Mode.CONSOLE).logStartupInfo(false).build().run(args)));
-    }
-
-    private static List<String> stringToList(String str, String splitChar) {
-        return Stream.of(str.split(splitChar)).collect(Collectors.toList());
     }
 
     public static Map<String, Schema> getSchemas(OpenAPI openAPI) {
@@ -166,10 +131,11 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
 
     @Override
     public void run(String... args) {
+        testCaseListener.startSession();
         try {
-            testCaseListener.startSession();
             this.doLogic(args);
             testCaseListener.endSession();
+
         } catch (StopExecutionException e) {
             LOGGER.debug("StopExecution: {}", e.getMessage());
         } catch (Exception e) {
@@ -179,38 +145,20 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
 
     public void doLogic(String... args) throws IOException {
         this.sortFuzzersByName();
+        filesArguments.loadConfig();
+        filterArguments.loadConfig(args);
         this.processArgs(args);
         this.printArgs();
-        this.processSkipFuzzerFor(args);
 
         OpenAPI openAPI = this.createOpenAPI();
         this.processContractDependentCommands(openAPI, args);
 
         List<String> suppliedPaths = this.matchSuppliedPathsWithContractPaths(openAPI);
-        catsParams.loadConfig();
+
         this.startFuzzing(openAPI, suppliedPaths);
         this.executeCustomFuzzer();
     }
 
-    public void processSkipFuzzerFor(String... args) {
-        List<String> skipForArgs = Arrays.stream(args)
-                .filter(arg -> arg.startsWith("--skip") && arg.contains("ForPath")).collect(Collectors.toList());
-
-        List<CatsSkipped> catsSkipped = skipForArgs.stream()
-                .map(skipFor -> skipFor.replace("--skip", "")
-                        .replace("ForPath", "").split("="))
-                .map(skipForArr -> CatsSkipped.builder()
-                        .fuzzer(skipForArr[0].trim())
-                        .forPaths(stringToList(skipForArr[1].trim(), ","))
-                        .build())
-                .collect(Collectors.toList());
-        LOGGER.start("skipXXXForPath supplied arguments: {}. Matching with registered fuzzers...", catsSkipped);
-
-        this.skipFuzzersForPaths = catsSkipped.stream()
-                .filter(skipped -> fuzzers.stream().map(Object::toString).anyMatch(fuzzerName -> fuzzerName.equalsIgnoreCase(skipped.getFuzzer())))
-                .collect(Collectors.toList());
-        LOGGER.complete("skipXXXForPath list after matching with registered fuzzers: {}", this.skipFuzzersForPaths);
-    }
 
     public void startFuzzing(OpenAPI openAPI, List<String> suppliedPaths) {
         for (Map.Entry<String, PathItem> entry : this.sortPathsAlphabetically(openAPI)) {
@@ -244,11 +192,14 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
      * @return the list of paths from the contract matching the supplied list
      */
     private List<String> matchSuppliedPathsWithContractPaths(OpenAPI openAPI) {
-        List<String> suppliedPaths = stringToList(paths, ",");
-        if (suppliedPaths.isEmpty() || paths.equalsIgnoreCase(ALL)) {
+        List<String> suppliedPaths = Stream.of(filterArguments.getPaths().split(",")).collect(Collectors.toList());
+        if (suppliedPaths.isEmpty() || filterArguments.getPaths().equalsIgnoreCase(ALL)) {
             suppliedPaths.remove(ALL);
             suppliedPaths.addAll(openAPI.getPaths().keySet());
         }
+        List<String> skipPaths = Stream.of(filterArguments.getSkipPaths().split(",")).collect(Collectors.toList());
+        suppliedPaths = suppliedPaths.stream().filter(path -> !skipPaths.contains(path)).collect(Collectors.toList());
+
         suppliedPaths = CatsUtil.filterAndPrintNotMatching(suppliedPaths, path -> openAPI.getPaths().containsKey(path), LOGGER, "Supplied path is not matching the contract {}", Object::toString);
 
         return suppliedPaths;
@@ -256,19 +207,27 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
 
     public OpenAPI createOpenAPI() {
         try {
+            String finishMessage = ansi().fgGreen().a("Finished parsing the contract in {} ms").reset().toString();
             long t0 = System.currentTimeMillis();
             OpenAPIParser openAPIV3Parser = new OpenAPIParser();
             ParseOptions options = new ParseOptions();
             options.setResolve(true);
             options.setFlatten(true);
-            OpenAPI openAPI = openAPIV3Parser.readContents(new String(Files.readAllBytes(Paths.get(contract)), Charsets.UTF_8), null, options).getOpenAPI();
-
-            String finishMessage = ansi().fgGreen().a("Finished parsing the contract in {} ms").reset().toString();
+            OpenAPI openAPI = this.getOpenAPI(openAPIV3Parser, options);
             LOGGER.complete(finishMessage, (System.currentTimeMillis() - t0));
+
             return openAPI;
         } catch (Exception e) {
-            LOGGER.fatal("Error parsing OPEN API contract {}", contract);
+            LOGGER.fatal("Error parsing OPEN API contract {}", apiArguments.getContract());
             throw new StopExecutionException();
+        }
+    }
+
+    private OpenAPI getOpenAPI(OpenAPIParser openAPIV3Parser, ParseOptions options) throws IOException {
+        if (apiArguments.isRemoteContract()) {
+            return openAPIV3Parser.readLocation(apiArguments.getContract(), null, options).getOpenAPI();
+        } else {
+            return openAPIV3Parser.readContents(new String(Files.readAllBytes(Paths.get(apiArguments.getContract())), Charsets.UTF_8), null, options).getOpenAPI();
         }
     }
 
@@ -303,9 +262,7 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
         }
 
         this.processRemainingArguments(args);
-
         this.processLogLevelArgument();
-
         this.setReportingLevel();
     }
 
@@ -317,16 +274,16 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
     }
 
     private boolean isMinimumArgumentsNotSupplied(String[] args) {
-        return EMPTY.equalsIgnoreCase(contract) && (args.length != 3 || EMPTY.equalsIgnoreCase(server));
+        return apiArguments.isContractEmpty() && (args.length != 3 || apiArguments.isContractEmpty());
     }
 
     private void setReportingLevel() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger("com.endava.cats")).setLevel(Level.toLevel(reportingLevel));
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger("com.endava.cats")).setLevel(Level.toLevel(reportingArguments.getReportingLevel()));
     }
 
     private void processLogLevelArgument() {
-        if (!EMPTY.equalsIgnoreCase(logData)) {
-            String[] log = logData.split(":");
+        if (reportingArguments.hasLogData()) {
+            String[] log = reportingArguments.getLogData().split(":");
             ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(log[0])).setLevel(Level.toLevel(log[1]));
             LOGGER.info("Setting log level to {} for package {}", log[1], log[0]);
         }
@@ -386,7 +343,7 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
     }
 
     protected void fuzzPath(Map.Entry<String, PathItem> pathItemEntry, OpenAPI openAPI) {
-        List<String> configuredFuzzers = this.configuredFuzzers(pathItemEntry.getKey());
+        List<String> configuredFuzzers = filterArguments.getFuzzersForPath(pathItemEntry.getKey());
         Map<String, Schema> schemas = getSchemas(openAPI);
 
         /* WE NEED TO ITERATE THROUGH EACH HTTP OPERATION CORRESPONDING TO THE CURRENT PATH ENTRY*/
@@ -416,76 +373,10 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
         }
     }
 
-    protected List<String> configuredFuzzers(String pathKey) {
-        List<String> allFuzzersName = this.constructFuzzersList();
-        List<String> allowedFuzzers = allFuzzersName;
-
-        if (!ALL.equalsIgnoreCase(suppliedFuzzers)) {
-            allowedFuzzers = stringToList(suppliedFuzzers, ",");
-        }
-
-        allowedFuzzers = this.removeSkippedFuzzers(pathKey, allowedFuzzers);
-        allowedFuzzers = this.removeExcludedFuzzers(allowedFuzzers);
-
-        return CatsUtil.filterAndPrintNotMatching(allowedFuzzers, allFuzzersName::contains, LOGGER, "Supplied Fuzzer does not exist {}", Object::toString);
-    }
-
-    private List<String> constructFuzzersList() {
-        List<String> finalList = new ArrayList<>();
-        finalList.addAll(this.getFuzzersFromCheckArgument(checkFields, FieldFuzzer.class));
-        finalList.addAll(this.getFuzzersFromCheckArgument(checkContract, ContractInfoFuzzer.class));
-        finalList.addAll(this.getFuzzersFromCheckArgument(checkHeaders, HeaderFuzzer.class));
-        finalList.addAll(this.getFuzzersFromCheckArgument(checkHttp, HttpFuzzer.class));
-
-        if (finalList.isEmpty()) {
-            return fuzzers.stream().map(Object::toString).collect(Collectors.toList());
-        }
-        return finalList;
-    }
-
-    private List<String> getFuzzersFromCheckArgument(String checkArgument, Class<? extends Annotation> annotation) {
-        if (!EMPTY.equalsIgnoreCase(checkArgument)) {
-            return fuzzers.stream().filter(fuzzer -> AnnotationUtils.findAnnotation(fuzzer.getClass(), annotation) != null)
-                    .map(Object::toString).collect(Collectors.toList());
-        }
-        return Collections.emptyList();
-    }
-
-    private List<String> removeSkippedFuzzers(String pathKey, List<String> allowedFuzzers) {
-        return allowedFuzzers.stream().filter(fuzzer -> skipFuzzersForPaths.stream()
-                .noneMatch(catsSkipped -> catsSkipped.getFuzzer().equalsIgnoreCase(fuzzer) && catsSkipped.getForPaths().contains(pathKey)))
-                .collect(Collectors.toList());
-    }
-
-    private List<String> removeExcludedFuzzers(List<String> allowedFuzzers) {
-        List<String> fuzzersToExclude = stringToList(this.excludedFuzzers, ",");
-        return allowedFuzzers.stream().filter(fuzzer -> !fuzzersToExclude.contains(fuzzer)).collect(Collectors.toList());
-    }
 
     private void printUsage() {
         LOGGER.info("The following arguments are supported: ");
-        this.renderHelpToConsole("contract", "LOCATION_OF_THE_CONTRACT");
-        this.renderHelpToConsole("server", "BASE_URL_OF_THE_SERVICE");
-        this.renderHelpToConsole(FUZZERS_STRING, "COMMA_SEPARATED_LIST_OF_FUZZERS the list of fuzzers you want to run. You can use 'all' to include all fuzzers. To list all available fuzzers run: './cats.jar list fuzzers'");
-        this.renderHelpToConsole("log", "PACKAGE:LEVEL set custom log level of a given package");
-        this.renderHelpToConsole(PATHS_STRING, "PATH_LIST a comma separated list of paths to test. If no path is supplied, all paths will be considered");
-        this.renderHelpToConsole("fieldsFuzzingStrategy", "STRATEGY set the strategy for tge fields fuzzers. Supported strategies ONEBYONE, SIZE, POWERSET");
-        this.renderHelpToConsole("maxFieldsToRemove", "NUMBER set the maximum number of fields that will be removed from a request when using the SIZE fieldsFuzzingStrategy");
-        this.renderHelpToConsole("refData", "FILE specifies the file with fields that must have a fixed value in order for requests to succeed ");
-        this.renderHelpToConsole("headers", "FILE specifies custom headers that will be passed along with request. This can be used to pass oauth or JWT tokens for authentication purposed for example");
-        this.renderHelpToConsole("reportingLevel", "LEVEL this can be either INFO, WARN or ERROR. It can be used to suppress INFO logging and focus only on the reporting WARNS and/or ERRORS");
-        this.renderHelpToConsole("edgeSpacesStrategy", "STRATEGY this can be either validateAndTrim or trimAndValidate. It can be used to specify what CATS should expect when sending trailing and leading spaces valid values within fields");
-        this.renderHelpToConsole("urlParams", "A comma separated list of 'name:value' pairs of parameters to be replaced inside the URLs");
-        this.renderHelpToConsole("customFuzzerFile", "A file used by the `CustomFuzzer` that will be used to create user-supplied payloads");
-        this.renderHelpToConsole("skipXXXForPath", "/path1,/path2 can configure fuzzers to be excluded for the specified paths");
-        this.renderHelpToConsole("excludeFuzzers", "COMMA_SEPARATED_LIST_OF_FUZZERS the list of fuzzers you want to exclude");
-        this.renderHelpToConsole("securityFuzzerFile", "A file used by the `SecurityFuzzer` that will be used to inject special strings in order to exploit possible vulnerabilities");
-        this.renderHelpToConsole("printExecutionStatistics", "If supplied (no value needed), prints a summary of execution times for each endpoint and HTTP method");
-        this.renderHelpToConsole("useExamples", "true/false (default true), instruct CATS on whether to use examples from the OpenAPI contract or not");
-        this.renderHelpToConsole("checkFields", "If supplied (no value needed), it will only run the Field Fuzzers");
-        this.renderHelpToConsole("checkHeaders", "If supplied (no value needed), it will only run the Header Fuzzers");
-        this.renderHelpToConsole("checkHttp", "If supplied (no value needed), it will only run the HTTP Fuzzers");
-        this.renderHelpToConsole("checkContract", "If supplied (no value needed), it will only run the ContractInfo Fuzzers");
+        this.handleArgs(this::renderHelpToConsole);
 
         LOGGER.note("Example: ");
         LOGGER.note(EXAMPLE);
@@ -501,32 +392,27 @@ public class CatsMain implements CommandLineRunner, ExitCodeGenerator {
     }
 
     private void printArgs() {
-        LOGGER.info("server: {}", server);
-        LOGGER.info("contract: {}", contract);
-        LOGGER.info("{} registered fuzzers: {}", fuzzers.size(), fuzzers);
-        LOGGER.info("supplied fuzzers: {}", suppliedFuzzers);
-        LOGGER.info("fields fuzzing strategy: {}", fieldsFuzzingStrategy);
-        LOGGER.info("max fields to remove: {}", maxFieldsToRemove);
-        LOGGER.info("paths: {}", paths);
-        LOGGER.info("refData: {}", refDataFile);
-        LOGGER.info("headers: {}", headersFile);
-        LOGGER.info("reportingLevel: {}", reportingLevel);
-        LOGGER.info("edgeSpacesStrategy: {}", edgeSpacesStrategy);
-        LOGGER.info("urlParams: {}", urlParams);
-        LOGGER.info("customFuzzerFile: {}", customFuzzerFile);
-        LOGGER.info("securityFuzzerFile: {}", securityFuzzerFile);
-        LOGGER.info("printExecutionStatistic: {}", !EMPTY.equalsIgnoreCase(printExecutionStatistics));
-        LOGGER.info("excludeFuzzers: {}", excludedFuzzers);
-        LOGGER.info("useExamples: {}", useExamples);
-        LOGGER.info("log: {}", logData);
-        LOGGER.info("checkFields: {}", !EMPTY.equalsIgnoreCase(checkFields));
-        LOGGER.info("checkHeaders: {}", !EMPTY.equalsIgnoreCase(checkHeaders));
-        LOGGER.info("checkHttp: {}", !EMPTY.equalsIgnoreCase(checkHttp));
-        LOGGER.info("checkContract: {}", !EMPTY.equalsIgnoreCase(checkContract));
+        LOGGER.info(" ");
+        LOGGER.info("Supplied arguments");
+        this.handleArgs(this::printArg);
     }
 
-    private void renderHelpToConsole(String command, String text) {
-        LOGGER.info(COMMAND_TEMPLATE, command, text);
+    private void handleArgs(Consumer<CatsArg> consumer) {
+        apiArguments.getArgs().forEach(consumer);
+        filterArguments.getArgs().forEach(consumer);
+        checkArgs.getArgs().forEach(consumer);
+        processingArguments.getArgs().forEach(consumer);
+        reportingArguments.getArgs().forEach(consumer);
+        filesArguments.getArgs().forEach(consumer);
+        authArgs.getArgs().forEach(consumer);
+    }
+
+    private void printArg(CatsArg arg) {
+        LOGGER.info("{}: {}", arg.getName(), arg.getValue());
+    }
+
+    private void renderHelpToConsole(CatsArg catsArg) {
+        LOGGER.info(COMMAND_TEMPLATE, catsArg.getName(), catsArg.getHelp());
     }
 
     @Override

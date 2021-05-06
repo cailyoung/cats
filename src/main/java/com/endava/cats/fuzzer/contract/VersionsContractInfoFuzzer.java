@@ -5,6 +5,7 @@ import com.endava.cats.model.FuzzingData;
 import com.endava.cats.report.TestCaseListener;
 import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -14,6 +15,7 @@ import java.util.regex.Pattern;
 
 @ContractInfoFuzzer
 @Component
+@ConditionalOnProperty(value = "fuzzer.contract.VersionsContractInfoFuzzer.enabled", havingValue = "true")
 public class VersionsContractInfoFuzzer extends BaseContractInfoFuzzer {
     private static final List<String> VERSIONS = Arrays.asList("version\\d*\\.?", "v\\d+\\.?");
     private final PrettyLogger log = PrettyLoggerFactory.getLogger(this.getClass());
@@ -24,7 +26,7 @@ public class VersionsContractInfoFuzzer extends BaseContractInfoFuzzer {
 
     @Override
     public void process(FuzzingData data) {
-        testCaseListener.addScenario(log, "Scenario: Check if the current path contains versioning information");
+        testCaseListener.addScenario(log, "Check if the current path contains versioning information");
         testCaseListener.addExpectedResult(log, "Paths should not contain versioning information. This should be handled in the [servers] definition");
 
         boolean found = false;

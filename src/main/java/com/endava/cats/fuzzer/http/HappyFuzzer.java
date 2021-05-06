@@ -10,6 +10,7 @@ import com.endava.cats.report.TestCaseListener;
 import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @HttpFuzzer
+@ConditionalOnProperty(value = "fuzzer.http.HappyFuzzer.enabled", havingValue = "true")
 public class HappyFuzzer implements Fuzzer {
     private static final PrettyLogger LOGGER = PrettyLoggerFactory.getLogger(HappyFuzzer.class);
 
@@ -34,8 +36,8 @@ public class HappyFuzzer implements Fuzzer {
     }
 
     private void process(FuzzingData data) {
-        testCaseListener.addScenario(LOGGER, "Scenario: send a 'happy' flow request will all fields and all headers in");
-        testCaseListener.addExpectedResult(LOGGER, "Expected result: should get a 2XX response code");
+        testCaseListener.addScenario(LOGGER, "Send a 'happy' flow request will all fields and all headers in");
+        testCaseListener.addExpectedResult(LOGGER, "Should get a 2XX response code");
         CatsResponse response = serviceCaller.call(data.getMethod(), ServiceData.builder().relativePath(data.getPath()).headers(data.getHeaders())
                 .payload(data.getPayload()).queryParams(data.getQueryParams()).build());
 

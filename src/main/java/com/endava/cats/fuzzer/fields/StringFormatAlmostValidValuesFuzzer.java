@@ -5,10 +5,11 @@ import com.endava.cats.generator.format.FormatGenerator;
 import com.endava.cats.io.ServiceCaller;
 import com.endava.cats.model.FuzzingData;
 import com.endava.cats.report.TestCaseListener;
-import com.endava.cats.util.CatsParams;
+import com.endava.cats.args.FilesArguments;
 import com.endava.cats.util.CatsUtil;
 import io.swagger.v3.oas.models.media.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -16,10 +17,11 @@ import java.util.List;
 
 @Component
 @FieldFuzzer
+@ConditionalOnProperty(value = "fuzzer.fields.StringFormatAlmostValidValuesFuzzer.enabled", havingValue = "true")
 public class StringFormatAlmostValidValuesFuzzer extends BaseBoundaryFieldFuzzer {
 
     @Autowired
-    public StringFormatAlmostValidValuesFuzzer(ServiceCaller sc, TestCaseListener lr, CatsUtil cu, CatsParams cp) {
+    public StringFormatAlmostValidValuesFuzzer(ServiceCaller sc, TestCaseListener lr, CatsUtil cu, FilesArguments cp) {
         super(sc, lr, cu, cp);
     }
 

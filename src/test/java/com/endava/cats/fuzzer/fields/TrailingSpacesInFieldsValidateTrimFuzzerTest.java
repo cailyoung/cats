@@ -1,10 +1,11 @@
 package com.endava.cats.fuzzer.fields;
 
+import com.endava.cats.args.FilesArguments;
 import com.endava.cats.fuzzer.http.ResponseCodeFamily;
+import com.endava.cats.generator.simple.PayloadGenerator;
 import com.endava.cats.io.ServiceCaller;
 import com.endava.cats.model.FuzzingStrategy;
 import com.endava.cats.report.TestCaseListener;
-import com.endava.cats.util.CatsParams;
 import com.endava.cats.util.CatsUtil;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,13 +26,13 @@ class TrailingSpacesInFieldsValidateTrimFuzzerTest {
     private CatsUtil catsUtil;
 
     @Mock
-    private CatsParams catsParams;
+    private FilesArguments filesArguments;
 
     private TrailingSpacesInFieldsValidateTrimFuzzer trailingSpacesInFieldsValidateTrimFuzzer;
 
     @BeforeEach
     void setup() {
-        trailingSpacesInFieldsValidateTrimFuzzer = new TrailingSpacesInFieldsValidateTrimFuzzer(serviceCaller, testCaseListener, catsUtil, catsParams);
+        trailingSpacesInFieldsValidateTrimFuzzer = new TrailingSpacesInFieldsValidateTrimFuzzer(serviceCaller, testCaseListener, catsUtil, filesArguments);
     }
 
     @Test
@@ -43,5 +44,17 @@ class TrailingSpacesInFieldsValidateTrimFuzzerTest {
         Assertions.assertThat(trailingSpacesInFieldsValidateTrimFuzzer.getExpectedHttpCodeWhenFuzzedValueNotMatchesPattern()).isEqualTo(ResponseCodeFamily.FOURXX);
         Assertions.assertThat(trailingSpacesInFieldsValidateTrimFuzzer.description()).isNotNull();
         Assertions.assertThat(trailingSpacesInFieldsValidateTrimFuzzer.typeOfDataSentToTheService()).isNotNull();
+    }
+
+    @Test
+    void shouldNotFuzzIfDiscriminatorField() {
+        PayloadGenerator.GlobalData.getDiscriminators().add("pet#type");
+        Assertions.assertThat(trailingSpacesInFieldsValidateTrimFuzzer.isFuzzingPossibleSpecificToFuzzer(null, "pet#type", null)).isFalse();
+    }
+
+    @Test
+    void shouldFuzzIfNotDiscriminatorField() {
+        PayloadGenerator.GlobalData.getDiscriminators().add("pet#type");
+        Assertions.assertThat(trailingSpacesInFieldsValidateTrimFuzzer.isFuzzingPossibleSpecificToFuzzer(null, "pet#number", null)).isTrue();
     }
 }

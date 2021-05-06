@@ -3,6 +3,7 @@ package com.endava.cats.report;
 import com.endava.cats.CatsMain;
 import com.endava.cats.fuzzer.Fuzzer;
 import com.endava.cats.fuzzer.http.ResponseCodeFamily;
+import com.endava.cats.generator.simple.PayloadGenerator;
 import com.endava.cats.io.TestCaseExporter;
 import com.endava.cats.model.CatsRequest;
 import com.endava.cats.model.CatsResponse;
@@ -19,7 +20,6 @@ import org.fusesource.jansi.Ansi;
 import org.slf4j.MDC;
 import org.slf4j.event.Level;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.stereotype.Component;
 
@@ -46,9 +46,7 @@ public class TestCaseListener {
     private final ExecutionStatisticsListener executionStatisticsListener;
     private final TestCaseExporter testCaseExporter;
     private final BuildProperties buildProperties;
-    private long t0;
-    @Value("${printExecutionStatistics:empty}")
-    private String printExecutionStatistics;
+
 
     @Autowired
     public TestCaseListener(ExecutionStatisticsListener er, TestCaseExporter tce, BuildProperties buildProperties) {
@@ -117,40 +115,23 @@ public class TestCaseListener {
     private void endTestCase() {
         testCaseMap.get(MDC.get(ID)).setFuzzer(MDC.get("fuzzerKey"));
         if (testCaseMap.get(MDC.get(ID)).isNotSkipped()) {
-            testCaseExporter.writeToFile(testCaseMap.get(MDC.get(ID)));
+            testCaseExporter.writeTestCase(testCaseMap.get(MDC.get(ID)));
         }
     }
 
     public void startSession() {
-        t0 = System.currentTimeMillis();
         DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC"));
         LOGGER.start("Starting {}, version {}, build-time {} UTC", ansi().fg(Ansi.Color.GREEN).a(buildProperties.getName().toUpperCase()), ansi().fg(Ansi.Color.GREEN).a(buildProperties.getVersion()), ansi().fg(Ansi.Color.GREEN).a(formatter.format(buildProperties.getTime())).reset());
         LOGGER.note("{}", ansi().fgGreen().a("Processing configuration...").reset());
     }
 
     public void endSession() {
-        testCaseExporter.writeSummary(testCaseMap, executionStatisticsListener.getAll(), executionStatisticsListener.getSuccess(), executionStatisticsListener.getWarns(), executionStatisticsListener.getErrors());
-
-        if (!"empty".equalsIgnoreCase(printExecutionStatistics)) {
-            testCaseExporter.writePerformanceReport(testCaseMap);
-        } else {
-            LOGGER.skip("Skip printing time execution statistics. You can use --printExecutionStatistics to enable this feature!");
-        }
-        testCaseExporter.writeReportFiles();
-        this.printExecutionDetails();
+        testCaseExporter.writeSummary(testCaseMap, executionStatisticsListener);
+        testCaseExporter.writeHelperFiles();
+        testCaseExporter.writePerformanceReport(testCaseMap);
+        testCaseExporter.printExecutionDetails(executionStatisticsListener);
     }
 
-    private void printExecutionDetails() {
-        String catsFinished = ansi().fgBlue().a("CATS finished in {} ms. Total (excluding skipped) requests {}. ").toString();
-        String passed = ansi().fgGreen().bold().a("✔ Passed {}, ").toString();
-        String warnings = ansi().fgYellow().bold().a("⚠ warnings: {}, ").toString();
-        String errors = ansi().fgRed().bold().a("‼ errors: {}, ").toString();
-        String skipped = ansi().fgCyan().bold().a("❯ skipped: {}. ").toString();
-        String check = ansi().reset().fgBlue().a("You can check the test_cases folder for more details about the payloads.").reset().toString();
-        String finalMessage = catsFinished + passed + warnings + errors + skipped + check;
-
-        LOGGER.complete(finalMessage, (System.currentTimeMillis() - t0), executionStatisticsListener.getAll(), executionStatisticsListener.getSuccess(), executionStatisticsListener.getWarns(), executionStatisticsListener.getErrors(), executionStatisticsListener.getSkipped());
-    }
 
     public void reportWarn(PrettyLogger logger, String message, Object... params) {
         executionStatisticsListener.increaseWarns();
@@ -188,15 +169,15 @@ public class TestCaseListener {
                         responseCodeUnimplemented(ResponseCodeFamily.isUnimplemented(response.getResponseCode())).build();
 
         if (assertions.isResponseCodeExpectedAndDocumentedAndMatchesResponseSchema()) {
-            this.reportInfo(logger, "Call returned as expected. Response code {} matches the contract. Response body matches the contract!", response.responseCodeAsString());
+            this.reportInfo(logger, "Response matches expected result. Response code [{}] is documented and response body matches the corresponding schema.", response.responseCodeAsString());
         } else if (assertions.isResponseCodeExpectedAndDocumentedButDoesntMatchResponseSchema()) {
-            this.reportWarn(logger, "Call returned as expected. Response code {} matches the contract. Response body does NOT match the contract!", response.responseCodeAsString());
+            this.reportWarn(logger, "Response does NOT match expected result. Response code [{}] is documented, but response body does NOT matches the corresponding schema.", response.responseCodeAsString());
         } else if (assertions.isResponseCodeExpectedButNotDocumented()) {
-            this.reportWarn(logger, "Call returned as expected, but with undocumented code: expected {}, actual [{}]. Documented response codes: {}", expectedResultCode.allowedResponseCodes(), response.responseCodeAsString(), data.getResponseCodes());
+            this.reportWarn(logger, "Response does NOT match expected result. Response code is from a list of expected codes for this FUZZER, but it is undocumented: expected {}, actual [{}], documented response codes: {}", expectedResultCode.allowedResponseCodes(), response.responseCodeAsString(), data.getResponseCodes());
         } else if (assertions.isResponseCodeDocumentedButNotExpected()) {
-            this.reportError(logger, "Call returned an unexpected result, but with documented code: expected {}, actual [{}]", expectedResultCode.allowedResponseCodes(), response.responseCodeAsString());
+            this.reportError(logger, "Response does NOT match expected result. Response code is NOT from a list of expected codes for this FUZZER: expected {}, actual [{}]", expectedResultCode.allowedResponseCodes(), response.responseCodeAsString());
         } else if (assertions.isResponseCodeUnimplemented()) {
-            this.reportWarn(logger, "Call returned http code 501: you forgot to implement this functionality!");
+            this.reportWarn(logger, "Response HTTP code 501: you forgot to implement this functionality!");
         } else {
             this.reportError(logger, "Unexpected behaviour: expected {}, actual [{}]", expectedResultCode.allowedResponseCodes(), response.responseCodeAsString());
         }
@@ -207,7 +188,7 @@ public class TestCaseListener {
     }
 
     public void skipTest(PrettyLogger logger, String skipReason) {
-        this.addExpectedResult(logger, "Expected result: test will be skipped!");
+        this.addExpectedResult(logger, "Test will be skipped!");
         this.reportSkipped(logger, skipReason);
         this.addRequest(CatsRequest.empty());
         this.addResponse(CatsResponse.empty());
@@ -291,7 +272,9 @@ public class TestCaseListener {
 
     private boolean matchesSingleElement(String responseSchema, JsonElement element, String name) {
         boolean result = true;
-        if (element.isJsonObject()) {
+        if (element.isJsonObject() && PayloadGenerator.GlobalData.getAdditionalProperties().contains(name)) {
+            return true;
+        } else if (element.isJsonObject()) {
             for (Map.Entry<String, JsonElement> inner : element.getAsJsonObject().entrySet()) {
                 result = result && matchesSingleElement(responseSchema, inner.getValue(), inner.getKey());
             }

@@ -7,6 +7,7 @@ import com.endava.cats.report.TestCaseListener;
 import io.github.ludovicianul.prettylogger.PrettyLogger;
 import io.github.ludovicianul.prettylogger.PrettyLoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -15,6 +16,7 @@ import java.util.stream.Collectors;
 
 @ContractInfoFuzzer
 @Component
+@ConditionalOnProperty(value = "fuzzer.contract.RecommendedHeadersContractInfoFuzzer.enabled", havingValue = "true")
 public class RecommendedHeadersContractInfoFuzzer extends BaseContractInfoFuzzer {
     static final List<String> HEADERS = Arrays.asList("correlationid", "traceid");
     private final PrettyLogger log = PrettyLoggerFactory.getLogger(this.getClass());
@@ -26,7 +28,7 @@ public class RecommendedHeadersContractInfoFuzzer extends BaseContractInfoFuzzer
 
     @Override
     public void process(FuzzingData data) {
-        testCaseListener.addScenario(log, "Scenario: Check if the current path contains recommended headers such as CorrelationId/TraceId");
+        testCaseListener.addScenario(log, "Check if the current path contains recommended headers such as CorrelationId/TraceId for HTTP method {}", data.getMethod());
         testCaseListener.addExpectedResult(log, "Recommended headers [TraceId/CorrelationId] must be present");
 
         List<CatsHeader> recommendedHeaders = data.getHeaders().stream()

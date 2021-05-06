@@ -21,7 +21,7 @@
 
 # Overview
 By using a simple and minimal syntax, with a flat learning curve, CATS enables you to generate hundreds of API tests within seconds with **no coding effort**. All tests cases are **generated and run automatically** based on a pre-defined 
-set of **55 Fuzzers**. The Fuzzers cover different types of testing like: negative testing, boundary testing, structural validations, security and even end-to-end functional flows.
+set of **58 Fuzzers**. The Fuzzers cover different types of testing like: negative testing, boundary testing, structural validations, security and even end-to-end functional flows.
 
 <div align="center">
   <img alt="CATS" width="100%" src="images/run_result.png"/>
@@ -33,11 +33,13 @@ Table of Contents
    * [Overview](#overview)
    * [Contract driven Auto-generated Tests for Swagger](#contract-driven-auto-generated-tests-for-swagger)
    * [How the Fuzzing works](#how-the-fuzzing-works)
+   * [Tutorials on how to use CATS](#tutorials-on-how-to-use-cats)
    * [Build](#build)
    * [Available commands](#available-commands)
    * [Running CATS](#running-cats-with-fuzzers)
       * [Notes on Unit Tests](#notes-on-unit-tests)
       * [Notes on skipped Tests](#notes-on-skipped-tests)
+   * [Interpreting Results](#interpreting-results) 
    * [Available arguments](#available-arguments)
    * [Available Fuzzers](#available-fuzzers)
       * [Field Fuzzers](#field-fuzzers)
@@ -87,6 +89,9 @@ Table of Contents
    * [Dealing with AnyOf, AllOf and OneOf](#dealing-with-anyof-allof-and-oneof)
    * [Dynamic values in configuration files](#dynamic-values-in-configuration-files)
    * [Running behind proxy](#running-behind-proxy)
+   * [Dealing with Authentication](#dealing-with-authentication)
+      * [HTTP header(s) based authentication](#http-headers-based-authentication)
+      * [One-Way or Two-Way SSL](#one-way-or-two-way-ssl)
    * [Limitations](#limitations)
       * [Media types and HTTP methods](#media-types-and-http-methods)
       * [Inheritance and composition](#inheritance-and-composition)
@@ -118,6 +123,11 @@ There are also differences on how the fuzzing works depending on the HTTP method
 
 This means that for methods with request bodies (`POST,PUT`) that have also URL/path parameters, you need to supply the `path` parameters via `urlParams` or the `referenceData` file as failure to do so will result in `Illegal character in path at index ...` errors. 
 
+# Tutorials on how to use CATS
+This is a list of articles with step-by-step guides on how to use CATS:
+* [Testing the GitHub API with CATS](https://ludovicianul.github.io/2020/10/05/github-api-testing/)
+* [How to write self-healing functional tests with no coding effort](https://ludovicianul.github.io/2020/09/09/cats/)
+
 # Build
 
 You can use the following Maven command to build the project:
@@ -125,6 +135,12 @@ You can use the following Maven command to build the project:
 `mvn clean package`
 
 This will output a `cats.jar` file in the current directory. The file is an executable JAR that will run in Linux environments. Just run `chmod +x cats.jar` to make the file executable.
+
+**Note:** You will need to configure Maven with a [Github PAT](https://docs.github.com/en/free-pro-team@latest/packages/guides/configuring-apache-maven-for-use-with-github-packages) with `read-packages` scope to get some dependencies for the build.
+
+## Notes on Unit Tests
+
+You may see some `ERROR` log messages while running the Unit Tests. Those are expected behaviour for testing the negative scenarios of the `Fuzzers`.
 
 # Available commands
 To list all available commands, run CATS with no arguments:
@@ -149,22 +165,35 @@ A minimal run must provide the Swagger/OpenAPI contract, and the URL address of 
 
 But there are multiple other arguments you can supply. More details in the [available arguments](#available-arguments) section.
 
-## Notes on Unit Tests
-
-You may see some `ERROR` log messages while running the Unit Tests. Those are expected behaviour for testing the negative scenarios of the `Fuzzers`.
-
 ## Notes on skipped Tests
 You may notice a significant number of tests marked as `skipped`. CATS will try to apply all `Fuzzers` to all fields, but this is not always possible.
 For example the `BooleanFieldsFuzzer` cannot be applied to `String` fields. This is why that test attempt will me marked as skipped.
 It was an intentional decision to report also the `skipped` tests in order to show that CATS actually tries all the `Fuzzers` on all the fields/paths/endpoints.
 
+# Interpreting Results
+After you run it, CATS will produce an execution report in a folder called `cats-report/TIMESTAMP` or `cats-report` depending on the `--timestampReports` argument. The folder will be created inside the current folder (if it doesn't exist) and for each run a new subfolder will be 
+created with the `TIMESTAMP` value when the run started. This allows to have a history of the runs. The report itself is in the `index.html` file, which will contain the following details:
+
+- filter test runs based on the result: `All`, `Success`, `Warn` and `Error`
+- filter based on the `Fuzzer` so that you can only see the runs only for that specific `Fuzzer`
+- a summary table with all the test cases with their corresponding path against they were run, and the result
+- ability to click on any test case and get details about the Scenario being executed, Expected Result, Actual result as well as request/response details
+
+This is the summary page:
+![run result](images/index_html.png)
+
+
+And this is what you get when you click on a specific test:
+![test details](images/test_details.png)
+
 # Available arguments
 - `--contract=LOCATION_OF_THE_CONTRACT` supplies the location of the OpenApi or Swagger contract.
 - `--server=URL` supplies the URL of the service implementing the contract.
-- `--basicauth=USR:PWD` supplies a `username:password` pair, in case the service uses basic auth (more auth schemes will follow in future releases).
+- `--basicauth=USR:PWD` supplies a `username:password` pair, in case the service uses basic auth.
 - `--fuzzers=LIST_OF_FUZZERS` supplies a comma separated list of fuzzers. If the argument is not supplied all fuzzers will be run.
 - `--log=PACKAGE:LEVEL` can configure custom log level for a given package. This is helpful when you want to see full HTTP traffic: `--log=org.apache.http.wire:debug`
 - `--paths=PATH_LIST` supplies a comma separated list of OpenApi paths to be tested. If no path is supplied, all paths will be considered.
+- `--skipPaths=PATH_LIST` a comma separated list of paths to ignore. If no path is supplied, no path will be ignored
 - `--fieldsFuzzingStrategy=STRATEGY` specifies which strategy will be used for field fuzzing. Available strategies are `ONEBYONE`, `SIZE` and `POWERSET`. More information on field fuzzing can be found in the sections below.
 - `--maxFieldsToRemove=NUMBER` specifies the maximum number of fields to be removed when using the `SIZE` fields fuzzing strategy.
 - `--refData=FILE` specifies the file containing static reference data which must be fixed in order to have valid business requests. This is a YAML file. It is explained further in the sections below.
@@ -177,25 +206,30 @@ It was an intentional decision to report also the `skipped` tests in order to sh
 - `--excludedFuzzers=LIST_OF_FIZZERs` a comma separated list of fuzzers that will be excluded for **all** paths. You must provide full `Fuzzer`. For example: `--excludedFuzzers=VeryLargeStringsFuzzer`
 - `--securityFuzzerFile` A file used by the `SecurityFuzzer` that will be used to inject special strings in order to exploit possible vulnerabilities
 - `--printExecutionStatistics` If supplied (no value needed), prints a summary of execution times for each endpoint and HTTP method
+- `--timestampReports` If supplied (no value needed), it will output the report still inside the `cats-report` folder, but in a sub-folder with the current timestamp
+- `--reportFormat=FORMAT` Specifies the format of the CATS report. You can use `htmlOnly` if you want the report to not contain any Javascript. This is useful in CI environments due to Javascript content security policies. Default is `htmlJs` which is the original CATS single page report format.
 - `--useExamples` If `true` (default value when not supplied) then CATS will use examples supplied in the OpenAPI contact. If `false` CATS will rely only on generated values
 - `--checkFields` If supplied (no value needed), it will only run the Field Fuzzers
 - `--checkHeaders` If supplied (no value needed), it will only run the Header Fuzzers
 - `--checkHttp` If supplied (no value needed), it will only run the HTTP Fuzzers
-- `--checkContract` If supplied (no value needed), it will only run the ContractInfo Fuzzers
+- `--checkContract` If supplied (no value needed), it will only run the ContractInfo Fuzzers 
+- `--sslKeystore` Location of the JKS keystore holding certificates used when authenticating calls using one-way or two-way SSL 
+- `--sslKeystorePwd` The password of the `sslKeystore`
+- `--sslKeyPwd` The password of the private key from the `sslKeystore`
 
 Using some of these options a typical invocation of CATS might look like this:
 
 `./cats.jar --contract=my.yml --server=https://locathost:8080 --log=org.apache.http.wire:debug --checkHeaders`
 
 # Available Fuzzers
-To get a list of fuzzers just run `./cats.jar list fuzzers`. A list of all of the available fuzzers will be returned, along with a short description for each.
+To get a list of fuzzers just run `./cats.jar list fuzzers`. A list of all available fuzzers will be returned, along with a short description for each.
 
 There are multiple categories of `Fuzzers` available:
-- Field `Fuzzers`: which target request body fields or path parameters
-- Header `Fuzzers`: which target HTTP headers
-- HTTP `Fuzzers`: which target just the interaction with the service (without fuzzing fields or headers)
-- ContractInfo `Fuzzers`: which checks the contract for API good practices
-- Special `Fuzzers`: a special category which need further configuration and are focused on more complex activities like functional flow or security testing
+- `Field Fuzzers` which target request body fields or path parameters
+- `Header Fuzzers` which target HTTP headers
+- `HTTP Fuzzers` which target just the interaction with the service (without fuzzing fields or headers)
+- `ContractInfo Fuzzers` which checks the contract for API good practices
+- `Special Fuzzers` a special category which need further configuration and are focused on more complex activities like functional flow or security testing
 
 ## Field Fuzzers
 `CATS` has currently 28 registered Field `Fuzzers`:
@@ -368,7 +402,7 @@ The `Fuzzers` expect:
 - `415` for unsupported or invalid `Content-Type` headers
 
 ### CheckSecurityHeadersFuzzer
-This `Fuzzer` will continues the [OWASP REST API recommendations](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html) by checking
+This `Fuzzer` will continue the [OWASP REST API recommendations](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html) by checking
 a list of required Security headers that must be supplied in each response. 
 
 The `Fuzzer` expects a `2XX` response with the following headers set:
@@ -427,10 +461,13 @@ Usually a good OpenAPI contract must follow several good practices in order to m
 - avoid using `xml` payload unless there is a really good reason (like documenting an old API for example)
 - json types and properties do not use the same naming (like having a `Pet` with a property named `pet`)
 
-`CATS` has currently 6 registered ContractInfo `Fuzzers`:
+`CATS` has currently 9 registered ContractInfo `Fuzzers`:
+- `HttpStatusCodeInValidRangeFuzzer` -  verifies that all HTTP response codes are within the range of 100 to 599
 - `NamingsContractInfoFuzzer` - verifies that all OpenAPI contract elements follow REST API naming good practices
 - `PathTagsContractInfoFuzzer` - verifies that all OpenAPI paths contain tags elements and checks if the tags elements match the ones declared at the top level
 - `RecommendedHeadersContractInfoFuzzer` - verifies that all OpenAPI contract paths contain recommended headers like: CorrelationId/TraceId, etc.
+- `RecommendedHttpCodesContractInfoFuzzer` - verifies that the current path contains all recommended HTTP response codes for all operations
+- `SecuritySchemesContractInfoFuzzer` - verifies if the OpenApi contract contains valid security schemas for all paths, either globally configured or per path
 - `TopLevelElementsContractInfoFuzzer` - verifies that all OpenAPI contract level elements are present and provide meaningful information: API description, documentation, title, version, etc.
 - `VersionsContractInfoFuzzer` - verifies that a given path doesn't contain versioning information
 - `XmlContentTypeContractInfoFuzzer` - verifies that all OpenAPI contract paths responses and requests does not offer `application/xml` as a Content-Type
@@ -441,8 +478,10 @@ You can run only these `Fuzzers` by supplying the `--checkContract` argument.
 ## Special Fuzzers
 ### CustomFuzzer
 #### Writing Custom Tests
-In some cases, the tests generated by CATS will not be sufficient for your situation. Using the `CustomFuzzer` you can supply custom values for specific fields. The cool thing is that you can target a single field, and the rest of the information will be populated by `CATs` using valid data, just like a 'happy' flow request.
-It's important to note that `reference data` won't get replaced when using the `CustomFuzzer`. So if there are reference data fields, you must also supply those in the `CustomFuzzer`.
+In some cases, the tests generated by CATS will not be sufficient for your situation. 
+Using the `CustomFuzzer` you can leverage the full power if CATS on not writing any code, while also supply custom values for specific fields. 
+The cool thing is that you can target a single field, and the rest of the information will be populated by `CATS` using valid data, just like a 'happy' flow request.
+**It's important to note that `reference data` won't get replaced when using the `CustomFuzzer`. So if there are reference data fields, you must also supply those in the `CustomFuzzer`.**
 The `CustomFuzzer` will only trigger if a valid `customFuzzer.yml` file is supplied. The file has the following syntax:
 
 ```yaml
@@ -461,7 +500,7 @@ The `CustomFuzzer` will only trigger if a valid `customFuzzer.yml` file is suppl
         httpMethod: HTTP_NETHOD
 ```
 
-Some things to note about the `customFuzzer.yml` file:
+This is a description of the elements within the `customFuzzer.yml` file:
 - you can supply a `description` of the test case. This will be set as the `Scenario` description. If you don't supply a `description` the `testNumber` will be used instead.
 - you can have multiple tests under the same path: `test1`, `test2`, etc.
 - `expectedResponseCode` is mandatory, otherwise the `Fuzzer` will ignore this test. The `expectedResponseCode` tells CATS what to expect from the service when sending this test.
@@ -472,7 +511,7 @@ Some things to note about the `customFuzzer.yml` file:
 - if a `httpMethod` parameter is supplied, but it doesn't exist in the OpenAPI given path, a `warning` will be issued and no test will be executed
 - if a `httpMethod` parameter is supplied, but is not a valid HTTP method, a `warning` will be issued and no test will be executed
 - if the request payload uses a `oneOf` element to allow multiple request types, you can control which of the possible types the `CustomFuzzer` will apply to using the `oneOfSelection` keyword. The value of the `oneOfSelection` keyword must match the fully qualified name of the `discriminator`.
-- if no `oneOfSelection` is supplied and the request payload accepts multiple `oneOf` elements, than a custom test will be created for each type of payload
+- if no `oneOfSelection` is supplied, and the request payload accepts multiple `oneOf` elements, than a custom test will be created for each type of payload
 - the file uses [Json path](https://github.com/json-path/JsonPath) syntax for all the properties you can supply; you can separate elements through `#` as in the example above instead of `.`
 
 #### Dealing with oneOf, anyOf
@@ -484,6 +523,7 @@ As CATs mostly relies on generated data with small help from some reference data
 We need a way to get some identifier from the POST call and send it to the GET call. This is now possible using the `CustomFuzzer`.
 The `customFuzzerFile` can have an `output` entry where you can state a variable name, and its fully qualified name from the response in order to set its value. 
 You can then refer the variable using `${variable_name}` from another test case in order to use its value. 
+
 Here is an example:
 ```yaml
 /pet:
@@ -502,6 +542,7 @@ Here is an example:
 ```
 
 Suppose the `test_1` execution outputs:
+
 ```json
 {
   "pet": 
@@ -518,7 +559,8 @@ When executing `test_2` the `id` parameter will be replaced with the `petId` var
 - variables are visible across all custom tests; please be careful with the naming as they will get overridden
 
 #### Verifying responses
-The `CustomFuzzer` can verify more than just the `expectedResponseCode`. This is achieved using the `verify` element. This is an extended version of the above `customFuzzer.yml` file.
+The `CustomFuzzer` can verify more than just the `expectedResponseCode`. This is achieved using the `verify` element. This is an extended version of the above `customFuzzer.yml` file.  
+
 ```yaml
 /pet:
     test_1:
@@ -568,7 +610,7 @@ Some notes:
 - you can supply more than one parameter to check (as seen above)
 - if at least one of the parameters is not present in the response, `CATs` will report an error
 - if all parameters are found and have valid values, but the response code is not matched, `CATs` will report a warning
-- if all the parameters are found and match their values and the response code is as expected, `CATs` will report a success
+- if all the parameters are found and match their values, and the response code is as expected, `CATs` will report a success
 
 #### Working with additionalProperties in CustomFuzzer
 You can also set `additionalProperties` fields through the `customFuzzerFile` using the same syntax as for [Setting additionalProperties in Reference Data](#setting-additionalproperties).
@@ -599,11 +641,11 @@ The file uses [Json path](https://github.com/json-path/JsonPath) syntax for all 
 
 This is what the `SecurityFuzzer` will do after parsing the above `securityFuzzerFile`:
 - it will add the fixed value "My Pet" to all the request for the field `name`
-- for each field specified in the `targetFields` i.e. `pet#id` and `pet#description` will create requests for each line from the `xss.txt` file and supply those values in each field
-- if you consider the `xss.txt` sample file included in the `CATs` repo, this means that it will send 21 requests targeting `pet#id` and 21 requests targeting `pet#description` i.e. a total of 42 tests
+- for each field specified in the `targetFields` i.e. `pet#id` and `pet#description` it will create requests for each line from the `xss.txt` file and supply those values in each field
+- if you consider the `xss.txt` sample file included in the `CATs` repo, this means that it will send 21 requests targeting `pet#id` and 21 requests targeting `pet#description` i.e. a total of **42 tests**
 - for each of these 42 tests, the `SecurityFuzzer` will expect a `200` response code. If another response code is returned, then `CATs` will report the test as `error`.
 
-As an idea on how to create security tests, you can split the [nasty strings](https://github.com/minimaxir/big-list-of-naughty-strings) into multiple files of interest for your particular context.
+As an idea on how to create security tests, you can split the [nasty strings](https://github.com/minimaxir/big-list-of-naughty-strings) into multiple files of interest in your particular context.
 You can have a `sql_injection.txt`, a `xss.txt`, a `command_injection.txt` and so on. For each of these files, you can create a test entry in the `securityFuzzerFile` where you include the fields you think are meaningful for these types of tests.
 (It was a deliberate choice (for now) to not include all fields by default.) The `expectedResponseCode` should be tweaked according to your particular context. 
 Your service might sanitize data before validation, so might be perfectly valid to expect a `200` or might validate the fields directly, so might be perfectly valid to expect a `400`.
@@ -695,7 +737,7 @@ you can supply them via the `refData` file using the following syntax:
         anotherTest: "value2"
 ```
 
-The `additionalProperties` element must contain the actual key-value pairs to be send within the requests and also a top element if needed. `topElement` is not mandatory.
+The `additionalProperties` element must contain the actual key-value pairs to be sent within the requests and also a top element if needed. `topElement` is not mandatory.
 The above example will output the following json (considering also the above examples):
 ```json
 
@@ -722,10 +764,10 @@ You can also have the ability to send the same reference data for ALL paths (jus
 all:
   address#zip: 123
 ```
-This will try to replace `address#zip` in **all** requests (if the field present).
+This will try to replace `address#zip` in **all** requests (if the field is present).
 
 ## Removing fields
-There are (rare) cases when some fields my not make sense together. Something like: if you send `firstName` and `lastName`, you are not allowed to also send `name`. 
+There are (rare) cases when some fields may not make sense together. Something like: if you send `firstName` and `lastName`, you are not allowed to also send `name`. 
 As OpenAPI does not have the capability to send request fields which are dependent on each other, you can use the `refData` file to instruct CATS to remove fields before sending a request to the service.
 You can achieve this by using the `cats_remove_field` as a value for the fields you want to remove. For the above case the `refData` field will look as follows:
 
@@ -749,30 +791,30 @@ all:
 
 This will add the `Accept` header to all calls and the `jwt` header to the specified paths.
 
-# URL Params
-You can use `--urlParams` to send values for placeholders inside the contract paths. For example, if your contract paths look like: `/service/{version}/pets`, you can run cats as:
-`./cats.jar --contract=api.yml --server=http://localhost:8080 --urlParams=version:v1.0`
-
-so that each fuzzed path will replace `version` with `v1.0`. 
-
 # Edge Spaces Strategy
-There isn't a general consensus on how you should handle situations when you send leading and trailing spaces or leading and trailing valid values within fields. One strategy for the service will be to trim these values and consider them valid, while some other services will just consider them to be invalid. 
-You can control how CATS should expect such cases to be handled by the service using the `--edgeSpacesStrategy` argument. You can set this to `error` or `success` depending on how you expect the service to behave:
-- `error` means than the service will consider the values to be invalid, even if the value itself is valid, but has leading or trailing spaces.
-- `success` means that the service will trim the value and validate it afterwards.
+There isn't a consensus on how you should handle situations when you trail or prefix valid values with spaces.
+One strategy will be to have the service trimming spaces before doing the validation, while some other services will just validate them as they are.
+You can control how CATS should expect such cases to be handled by the service using the `--edgeSpacesStrategy` argument. 
+You can set this to `trimAndValidate` or `validateAndTrim` depending on how you expect the service to behave:
+- `trimAndValidate` means that the service will first trim the spaces and after that run the validation
+- `validateAndTrim` means that the service runs the validation first without any trimming of spaces
+
+This is a **global setting** i.e. configured when CATS starts and all `Fuzzer` expects a consistent behaviour from all the service endpoints.
 
 # URL Parameters
-There are cases when certain parts of the request URL are parameterized. For example a case like: `/{version}/pets`. `{version}` is supposed to have the same value for all requests. This is why you can supply actual values to replace such parameters using the `urlParams` argument.
-You can supply a `;` separated list of `name:value` pairs to replace the `name` parameters with their corresponding `value`. For example supplying `--urlParams=version:v1.0` will replace the `version` parameter from our example above with the value "v1.0".
+There are cases when certain parts of the request URL are parameterized. For example a case like: `/{version}/pets`. `{version}` is supposed to have the same value for all requests. 
+This is why you can supply actual values to replace such parameters using the `--urlParams` argument.
+You can supply a `;` separated list of `name:value` pairs to replace the `name` parameters with their corresponding `value`. 
+For example supplying `--urlParams=version:v1.0` will replace the `version` parameter from the above example with the value `v1.0`.
 
 # Dealing with AnyOf, AllOf and OneOf
 CATS also supports schemas with `oneOf`, `allOf` and `anyOf` composition. CATS wil consider all possible combinations when creating the fuzzed payloads.
 
 # Dynamic values in configuration files
 The following configuration files: `securityFuzzerFile, customFuzzerFile, refData` support setting dynamic values for the inner fields.
-For now **the support only exists** for `java.time.*`, but more types of elements might come in the near future.
+For now **the support only exists** for `java.time.*` and `org.apache.commons.lang3.*`, but more types of elements will come in the near future.
 
-Let's suppose you have a date/date-time field and you want to set it to 10 days from now. You can do this by setting this as a value `T(java.time.OffsetDateTime).now().plusDays(10)`.
+Let's suppose you have a date/date-time field, and you want to set it to 10 days from now. You can do this by setting this as a value `T(java.time.OffsetDateTime).now().plusDays(10)`.
 This will return an ISO compliant time in UTC format. 
 
 A `customFuzzerFile` using this can look like:
@@ -798,12 +840,28 @@ You can also check the responses using a similar syntax and also accounting for 
 The syntax of dynamically setting dates is compliant with the [Spring Expression Language](https://docs.spring.io/spring-framework/docs/3.0.x/reference/expressions.html) specs.
 
 # Running behind proxy
-If you need to run CATS behind a proxy, you can supply the following arguments: `proxyHost` and `proxyPort`.
+If you need to run CATS behind a proxy, you can supply the following arguments: `--proxyHost` and `--proxyPort`.
 A typical run with proxy settings on `localhost:8080` will look as follows:
 
 ```bash
 ./cats.jar --contract=YAML_FILE --server=SERVER_URL --proxyHost=localhost --proxyPort=8080
 ```
+
+# Dealing with Authentication
+## HTTP header(s) based authentication
+CATS supports any form of HTTP header(s) based authentication (basic auth, oauth, custom JWT, apiKey, etc) using the [headers](#headers-file) mechanism. You can supply the specific HTTP header name and value 
+and apply to `all` endpoints.
+Additionally, basic auth is also supported using the `--basicauth=USR:PWD` argument.
+
+## One-Way or Two-Way SSL
+By default, CATS trusts all server certificates and doesn't perform hostname verification. 
+
+For two-way SSL you can specify a JKS file (Java Keystore) that holds the client's private key using the following arguments:  
+- `--sslKeystore` Location of the JKS keystore holding certificates used when authenticating calls using one-way or two-way SSL
+- `--sslKeystorePwd` The password of the `sslKeystore`
+- `--sslKeyPwd` The password of the private key within the `sslKeystore`
+
+For details on how to load the certificate and private key into a Java Keystore you can use this guide: [https://mrkandreev.name/blog/java-two-way-ssl/](https://mrkandreev.name/blog/java-two-way-ssl/).
 
 # Limitations
 
@@ -831,11 +889,11 @@ However, if `Payload1` or `Payload2` will have an additional compositions, this 
 If a response contains a free Map specified using the `additionalParameters` tag CATS will issue a `WARN` level log message as it won't be able to validate that the response matches the schema.
 
 ## Regexes within 'pattern'
-Cats uses [RgxGen](https://github.com/curious-odd-man/RgxGen) in order to generate Strings based on regexes. This has certain limitations mostly with complex patterns.
+CATS uses [RgxGen](https://github.com/curious-odd-man/RgxGen) in order to generate Strings based on regexes. This has certain limitations mostly with complex patterns.
 
 # Custom Files General Info
 All custom files that can be used by CATS (`customFuzzerFile`, `headers`, `refData`, etc) are in a YAML format. When setting or getting values to/from JSON for input and/or output variables, you must use a [JsonPath](https://goessner.net/articles/JsonPath/) syntax using either `#`  (not `.`) as separators.
 You can find some selector examples here: [JsonPath](https://github.com/json-path/JsonPath).
 
 # Contributing
-Please refer to [CONTRIBUTING.md](CONTRIBUTING.md)
+Please refer to [CONTRIBUTING.md](CONTRIBUTING.md).
